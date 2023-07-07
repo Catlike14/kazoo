@@ -16,6 +16,7 @@
         ,call_event/4
         ,member_connect_req/2
         ,member_connect_win/3
+        ,member_connect_satisfied/2
         ,agent_timeout/2
         ,shared_failure/2
         ,shared_call_id/2
@@ -149,6 +150,10 @@ member_connect_req(ServerRef, JObj) ->
 -spec member_connect_win(pid(), kz_json:object(), member_connect_win_node()) -> 'ok'.
 member_connect_win(ServerRef, JObj, Node) ->
     gen_statem:cast(ServerRef, {'member_connect_win', JObj, Node}).
+
+-spec member_connect_satisfied(pid(), kz_json:object()) -> 'ok'.
+member_connect_satisfied(ServerRef, JObj) ->
+    gen_statem:cast(ServerRef, {'member_connect_satisfied', JObj}).
 
 -spec agent_timeout(pid(), kz_json:object()) -> 'ok'.
 agent_timeout(ServerRef, JObj) ->
@@ -655,6 +660,9 @@ ready('cast', {'member_connect_win', JObj, 'different_node'}, #state{agent_liste
                                                  ,monitoring='true'
                                                  }}
     end;
+ready('cast', {'member_connect_satisfied', _}, State) ->
+    lager:info("unexpected member_connect_satisfied"),
+    {'next_state', 'ready', State};
 ready('cast', {'member_connect_req', _}, #state{max_connect_failures=Max
                                                ,connect_failures=Fails
                                                ,account_id=AccountId
@@ -730,6 +738,31 @@ ringing('cast', {'member_connect_win', JObj, 'same_node'}, #state{agent_listener
     acdc_agent_listener:member_connect_retry(AgentListener, JObj),
 
     {'next_state', 'ringing', State};
+ringing('cast', {'member_connect_satisfied', JObj}, #state{agent_listener=AgentListener
+                                                          ,member_call_id=MemberCallId
+                                                          ,account_id=AccountId
+                                                          ,member_call_queue_id=QueueId
+                                                          ,agent_id=AgentId
+                                                          ,connect_failures=Fails
+                                                          ,max_connect_failures=MaxFails
+                                                          }=State) ->
+    lager:info("Received member_connect_satisfied: check if I should hangup"),
+    CallId = kz_json:get_ne_binary_value([<<"Call">>, <<"Call-Id">>], JObj, []),
+    case CallId =:= MemberCallId of
+        true ->
+            lager:info("Hanging up: some other agent replies"),
+            acdc_agent_listener:channel_hungup(AgentListener, MemberCallId),
+            acdc_stats:call_missed(AccountId, QueueId, AgentId, MemberCallId, <<"LOSE_RACE">>),
+            acdc_agent_listener:presence_update(AgentListener, ?PRESENCE_GREEN),
+
+            NewFSMState = clear_call(State, 'failed'),
+            NextState = return_to_state(Fails+1, MaxFails),
+            case NextState of
+                'paused' -> {'next_state', 'paused', NewFSMState};
+                'ready' -> apply_state_updates(NewFSMState)
+            end;
+        false -> {'next_state', 'ringing', State}
+    end;
 ringing('cast', {'originate_ready', JObj}, #state{agent_listener=AgentListener}=State) ->
     CallId = kz_json:get_value(<<"Call-ID">>, JObj),
 
@@ -986,6 +1019,9 @@ answered('cast', {'member_connect_win', JObj, 'same_node'}, #state{agent_listene
     acdc_agent_listener:member_connect_retry(AgentListener, JObj),
 
     {'next_state', 'answered', State};
+answered('cast', {'member_connect_satisfied', _}, State) ->
+    lager:info("unexpected member_connect_satisfied"),
+    {'next_state', 'answered', State};
 answered('cast', {'dialplan_error', _App}, #state{agent_listener=AgentListener
                                                  ,account_id=AccountId
                                                  ,agent_id=AgentId
@@ -1160,6 +1196,9 @@ wrapup('cast', {'member_connect_win', JObj, 'same_node'}, #state{agent_listener=
 wrapup('cast', {'member_connect_win', _, 'different_node'}, State) ->
     lager:debug("received member_connect_win for different node (wrapup)"),
     {'next_state', 'wrapup', State#state{wrapup_timeout=0}};
+wrapup('cast', {'member_connect_satisfied', _}, State) ->
+    lager:info("unexpected member_connect_satisfied"),
+    {'next_state', 'wrapup', State};
 wrapup('cast', {'sync_req', JObj}, #state{agent_listener=AgentListener
                                          ,wrapup_ref=Ref
                                          }=State) ->
@@ -1230,6 +1269,9 @@ paused('cast', {'member_connect_win', JObj, 'same_node'}, #state{agent_listener=
     acdc_agent_listener:member_connect_retry(AgentListener, JObj),
 
     {'next_state', 'paused', State};
+paused('cast', {'member_connect_satisfied', _}, State) ->
+    lager:info("unexpected member_connect_satisfied"),
+    {'next_state', 'paused', State};
 paused('cast', {'originate_uuid', ACallId, ACtrlQ}, #state{agent_listener=AgentListener}=State) ->
     acdc_agent_listener:originate_uuid(AgentListener, ACallId, ACtrlQ),
     {'next_state', 'paused', State};
@@ -1276,6 +1318,9 @@ outbound('cast', {'member_connect_win', JObj, 'same_node'}, #state{agent_listene
     lager:debug("agent won, but can't process this right now (on outbound call)"),
     acdc_agent_listener:member_connect_retry(AgentListener, JObj),
     {'next_state', 'outbound', State};
+outbound('cast', {'member_connect_satisfied', _}, State) ->
+    lager:info("unexpected member_connect_satisfied"),
+    {'next_state', 'wrapup', State};
 outbound('cast', {'originate_uuid', ACallId, ACtrlQ}, #state{agent_listener=AgentListener}=State) ->
     acdc_agent_listener:originate_uuid(AgentListener, ACallId, ACtrlQ),
     {'next_state', 'outbound', State};

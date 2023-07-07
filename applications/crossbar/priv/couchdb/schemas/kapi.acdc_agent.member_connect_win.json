@@ -6,8 +6,8 @@
         "Agent-ID": {
             "type": "string"
         },
-        "Agent-Process-ID": {
-            "type": "string"
+        "Agent-Process-IDs": {
+            "type": "array"
         },
         "CDR-Url": {
             "type": "string"
@@ -51,7 +51,7 @@
     },
     "required": [
         "Agent-ID",
-        "Agent-Process-ID",
+        "Agent-Process-IDs",
         "Call",
         "Queue-ID"
     ],

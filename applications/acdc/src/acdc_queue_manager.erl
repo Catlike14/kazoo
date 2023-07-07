@@ -394,6 +394,8 @@ handle_call('next_winner', _, #state{strategy='rr'
         {'empty', _} ->
             {'reply', 'undefined', State}
     end;
+handle_call('next_winner', _, #state{strategy='all'}=State) ->
+    {'reply', 'undefined', State};
 
 handle_call('get_agents', _, State) ->
     {'reply', agents_(State), State};
@@ -755,7 +757,9 @@ pick_winner(_Mgr, CRs, 'mi', _) ->
     AgentId = kz_json:get_value(<<"Agent-ID">>, MostIdle),
     {Same, Other} = split_agents(AgentId, Rest),
 
-    {[MostIdle|Same], Other}.
+    {[MostIdle|Same], Other};
+pick_winner(_Mgr, CRs, 'all', _AgentId) ->
+    {CRs, []}.
 
 %%------------------------------------------------------------------------------
 %% @doc Return the IDs of the agents that are ready to take calls.
@@ -886,7 +890,11 @@ do_update_strategy_with_agent(#state{strategy='rr'
 do_update_strategy_with_agent(#state{strategy='mi'
                                     ,strategy_state=SS
                                     }, AgentId, Change, _) ->
-    update_mi_strategy_with_agent(SS, AgentId, Change).
+    update_mi_strategy_with_agent(SS, AgentId, Change);
+do_update_strategy_with_agent(#state{strategy='all'
+                                    ,strategy_state=SS
+                                    }, AgentId, Change, _) ->
+    update_all_strategy_with_agent(SS, AgentId, Change).                                        
 
 %%------------------------------------------------------------------------------
 %% @doc Update the Round Robin strategy state with the change of availability
@@ -927,6 +935,24 @@ update_mi_strategy_with_agent(#strategy_state{agents=AgentL}=SS, AgentId, 'avail
 update_mi_strategy_with_agent(#strategy_state{agents=AgentL}=SS, AgentId, _) ->
     lists:member(AgentId, AgentL)
         andalso lager:info("removing agent ~s from strategy mi", [AgentId]),
+    AgentL1 = lists:delete(AgentId, AgentL),
+    SS#strategy_state{agents=AgentL1}.
+
+%%------------------------------------------------------------------------------
+%% @doc Update the Ring All strategy state with the change of availability
+%% for `AgentId'.
+%% @end
+%%------------------------------------------------------------------------------
+-spec update_all_strategy_with_agent(strategy_state(), kz_term:ne_binary(), agent_change()) ->
+          strategy_state().
+update_all_strategy_with_agent(#strategy_state{agents=AgentL}=SS, AgentId, 'available') ->
+    lists:member(AgentId, AgentL)
+        orelse lager:info("adding agent ~s to strategy all", [AgentId]),
+    AgentL1 = [AgentId | lists:delete(AgentId, AgentL)],
+    SS#strategy_state{agents=AgentL1};
+update_all_strategy_with_agent(#strategy_state{agents=AgentL}=SS, AgentId, _) ->
+    lists:member(AgentId, AgentL)
+        andalso lager:info("removing agent ~s from strategy all", [AgentId]),
     AgentL1 = lists:delete(AgentId, AgentL),
     SS#strategy_state{agents=AgentL1}.
 
@@ -981,6 +1007,7 @@ split_agents(AgentId, Rest) ->
 -spec get_strategy(kz_term:api_binary()) -> queue_strategy().
 get_strategy(<<"round_robin">>) -> 'rr';
 get_strategy(<<"most_idle">>) -> 'mi';
+get_strategy(<<"ring_all">>) -> 'all';
 get_strategy(_) -> 'rr'.
 
 -spec create_strategy_state(queue_strategy()) -> strategy_state().
@@ -991,6 +1018,7 @@ create_strategy_state(Strategy) ->
 -spec create_ss_agents(queue_strategy()) -> queue_strategy_state().
 create_ss_agents('rr') -> queue:new();
 create_ss_agents('mi') -> [].
+create_ss_agents('all') -> [].
 
 maybe_start_queue_workers(QueueSup, Count) ->
     WSup = acdc_queue_sup:workers_sup(QueueSup),
