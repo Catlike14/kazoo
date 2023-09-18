@@ -274,7 +274,7 @@ update_callfwd(#callfwd{doc_id=Id
     Updates = [fun(J) -> kz_json:set_value(<<"enabled">>, Enabled, J) end
               ,fun(J) -> kz_json:set_value(<<"number">>, Num, J) end
               ,fun(J) -> kz_json:set_value(<<"failover">>, Failover, J) end
-              ,fun(J) -> kz_json:set_value(<<"keep_caller_id">>, 'false, J) end
+              ,fun(J) -> kz_json:set_value(<<"keep_caller_id">>, 'false', J) end
               ],
     CFObj1 = lists:foldl(fun(F, Acc) -> F(Acc) end, CFObj, Updates),
     case kz_datamgr:save_doc(AccountDb, kz_json:set_value(<<"call_forward">>, CFObj1, JObj)) of
