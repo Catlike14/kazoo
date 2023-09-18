@@ -9,7 +9,7 @@
 
 %% rr :: Round Robin
 %% mi :: Most Idle
--type queue_strategy() :: 'rr' | 'mi'.
+-type queue_strategy() :: 'rr' | 'mi' | 'all'.
 
 -type queue_strategy_state() :: queue:queue() | kz_term:ne_binaries().
 -record(strategy_state, {agents :: queue_strategy_state()

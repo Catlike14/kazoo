@@ -394,6 +394,8 @@ handle_call('next_winner', _, #state{strategy='rr'
         {'empty', _} ->
             {'reply', 'undefined', State}
     end;
+handle_call('next_winner', _, #state{strategy='all'}=State) ->
+    {'reply', 'undefined', State};
 
 handle_call('get_agents', _, State) ->
     {'reply', agents_(State), State};
@@ -755,7 +757,9 @@ pick_winner(_Mgr, CRs, 'mi', _) ->
     AgentId = kz_json:get_value(<<"Agent-ID">>, MostIdle),
     {Same, Other} = split_agents(AgentId, Rest),
 
-    {[MostIdle|Same], Other}.
+    {[MostIdle|Same], Other};
+pick_winner(_Mgr, CRs, 'all', _AgentId) ->
+    {CRs, []}.
 
 %%------------------------------------------------------------------------------
 %% @doc Return the IDs of the agents that are ready to take calls.
@@ -774,7 +778,8 @@ ready_agents(#state{strategy=Strategy
 %%------------------------------------------------------------------------------
 -spec ready_agents(queue_strategy(), queue_strategy_state()) -> kz_term:ne_binaries().
 ready_agents('rr', AgentQueue) -> queue:to_list(AgentQueue);
-ready_agents('mi', AgentL) -> AgentL.
+ready_agents('mi', AgentL) -> AgentL;
+ready_agents('all', AgentL) -> AgentL.
 
 %%------------------------------------------------------------------------------
 %% @doc Return the count of agents that are ready to take calls.
@@ -793,7 +798,8 @@ ready_agent_count(#state{strategy=Strategy
 %%------------------------------------------------------------------------------
 -spec ready_agent_count(queue_strategy(), queue_strategy_state()) -> non_neg_integer().
 ready_agent_count('rr', AgentQueue) -> queue:len(AgentQueue);
-ready_agent_count('mi', AgentL) -> length(AgentL).
+ready_agent_count('mi', AgentL) -> length(AgentL);
+ready_agent_count('all', AgentL) -> length(AgentL).
 
 %%------------------------------------------------------------------------------
 %% @doc Return the count of agents that are eligible to be assigned to a waiting
@@ -819,7 +825,9 @@ assignable_agent_count(#state{strategy=Strategy
 assignable_agent_count('rr', AgentQueue, RingingAgents) ->
     ready_agent_count('rr', AgentQueue) + length(RingingAgents);
 assignable_agent_count('mi', AgentL, RingingAgents) ->
-    ready_agent_count('mi', AgentL) + length(RingingAgents).
+    ready_agent_count('mi', AgentL) + length(RingingAgents);
+assignable_agent_count('all', AgentL, RingingAgents) ->
+    ready_agent_count('all', AgentL) + length(RingingAgents).
 
 %%------------------------------------------------------------------------------
 %% @doc Return the IDs of all agents.
@@ -886,7 +894,11 @@ do_update_strategy_with_agent(#state{strategy='rr'
 do_update_strategy_with_agent(#state{strategy='mi'
                                     ,strategy_state=SS
                                     }, AgentId, Change, _) ->
-    update_mi_strategy_with_agent(SS, AgentId, Change).
+    update_mi_strategy_with_agent(SS, AgentId, Change);
+do_update_strategy_with_agent(#state{strategy='all'
+                                    ,strategy_state=SS
+                                    }, AgentId, Change, _) ->
+    update_all_strategy_with_agent(SS, AgentId, Change).                                        
 
 %%------------------------------------------------------------------------------
 %% @doc Update the Round Robin strategy state with the change of availability
@@ -931,6 +943,24 @@ update_mi_strategy_with_agent(#strategy_state{agents=AgentL}=SS, AgentId, _) ->
     SS#strategy_state{agents=AgentL1}.
 
 %%------------------------------------------------------------------------------
+%% @doc Update the Ring All strategy state with the change of availability
+%% for `AgentId'.
+%% @end
+%%------------------------------------------------------------------------------
+-spec update_all_strategy_with_agent(strategy_state(), kz_term:ne_binary(), agent_change()) ->
+          strategy_state().
+update_all_strategy_with_agent(#strategy_state{agents=AgentL}=SS, AgentId, 'available') ->
+    lists:member(AgentId, AgentL)
+        orelse lager:info("adding agent ~s to strategy all", [AgentId]),
+    AgentL1 = [AgentId | lists:delete(AgentId, AgentL)],
+    SS#strategy_state{agents=AgentL1};
+update_all_strategy_with_agent(#strategy_state{agents=AgentL}=SS, AgentId, _) ->
+    lists:member(AgentId, AgentL)
+        andalso lager:info("removing agent ~s from strategy all", [AgentId]),
+    AgentL1 = lists:delete(AgentId, AgentL),
+    SS#strategy_state{agents=AgentL1}.
+
+%%------------------------------------------------------------------------------
 %% @doc Apply strategy state changes based on the agent change flag (ringing/
 %% busy).
 %% @end
@@ -963,7 +993,7 @@ sort_agent(A, B) ->
 %% Otherwise CRs will never be empty
 -spec remove_unknown_agents(pid(), kz_json:objects()) -> kz_json:objects().
 remove_unknown_agents(Mgr, CRs) ->
-    case gen_listener:call(Mgr, 'current_agents') of
+    case gen_listener:call(Mgr, 'get_agents') of
         [] -> [];
         Agents ->
             [CR || CR <- CRs,
@@ -981,6 +1011,7 @@ split_agents(AgentId, Rest) ->
 -spec get_strategy(kz_term:api_binary()) -> queue_strategy().
 get_strategy(<<"round_robin">>) -> 'rr';
 get_strategy(<<"most_idle">>) -> 'mi';
+get_strategy(<<"ring_all">>) -> 'all';
 get_strategy(_) -> 'rr'.
 
 -spec create_strategy_state(queue_strategy()) -> strategy_state().
@@ -990,7 +1021,8 @@ create_strategy_state(Strategy) ->
 
 -spec create_ss_agents(queue_strategy()) -> queue_strategy_state().
 create_ss_agents('rr') -> queue:new();
-create_ss_agents('mi') -> [].
+create_ss_agents('mi') -> [];
+create_ss_agents('all') -> [].
 
 maybe_start_queue_workers(QueueSup, Count) ->
     WSup = acdc_queue_sup:workers_sup(QueueSup),
@@ -1091,6 +1123,14 @@ maybe_send_diagnostics_for_strategy_update('rr', AgentQueue, AgentId, RingingAge
           ,queue:to_list(AgentQueue)
           ]);
 maybe_send_diagnostics_for_strategy_update('mi', AgentL, AgentId, RingingAgents, BusyAgents) ->
+    Message = "agent ~s updated in SS~n~n"
+        ++ "ringing agents: ~p~n~n"
+        ++ "busy agents: ~p~n~n"
+        ++ "agent list: ~p",
+    ?DIAG(Message
+         ,[AgentId, RingingAgents, BusyAgents, AgentL]
+         );
+maybe_send_diagnostics_for_strategy_update('all', AgentL, AgentId, RingingAgents, BusyAgents) ->
     Message = "agent ~s updated in SS~n~n"
         ++ "ringing agents: ~p~n~n"
         ++ "busy agents: ~p~n~n"
