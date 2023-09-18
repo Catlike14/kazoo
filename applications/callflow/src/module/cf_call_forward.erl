@@ -38,6 +38,7 @@
 -record(callfwd, {keys = #keys{} :: keys()
                  ,doc_id :: kz_term:api_ne_binary()
                  ,enabled = 'false' :: boolean()
+                 ,failover = 'false' :: boolean()
                  ,number = <<>> :: binary()
                  ,require_keypress = 'true' :: boolean()
                  ,keep_caller_id = 'true' :: boolean()
@@ -63,7 +64,9 @@ handle(Data, Call) ->
 
             CF1 = case kz_json:get_ne_binary_value(<<"action">>, Data) of
                       <<"activate">> -> cf_activate(CF, CaptureGroup, Call);       %% Support for NANPA *72
+                      <<"activate_failover">> -> cf_activate_failover(CF, CaptureGroup, Call);
                       <<"deactivate">> -> cf_deactivate(CF, Call);                 %% Support for NANPA *73
+                      <<"deactivate_failover">> -> cf_deactivate_failover(CF, Call);
                       <<"update">> -> cf_update_number(CF, CaptureGroup, Call);    %% Support for NANPA *56
                       <<"toggle">> -> cf_toggle(CF, CaptureGroup, Call);
                       <<"menu">> -> cf_menu(CF, CaptureGroup, Call);
@@ -177,6 +180,43 @@ cf_deactivate(CF, Call) ->
 
 %%------------------------------------------------------------------------------
 %% @doc This function will update the call forwarding object on the owner
+%% document to enable call forwarding on failover
+%% @end
+%%------------------------------------------------------------------------------
+-spec cf_activate_failover(callfwd(), kz_term:api_binary(), kapps_call:call()) -> callfwd().
+cf_activate_failover(CF1, CaptureGroup, Call) when is_atom(CaptureGroup); CaptureGroup =:= <<>> ->
+    lager:info("activating call forwarding on failover to '~s'", [CaptureGroup]),
+    CF2 = #callfwd{number=Number} = cf_update_number(CF1, CaptureGroup, Call),
+    _ = try
+            {'ok', _} = kapps_call_command:b_prompt(<<"cf-now_forwarded_to">>, Call),
+            {'ok', _} = kapps_call_command:b_say(Number, Call)
+        catch
+            _:_ -> 'ok'
+        end,
+    CF2#callfwd{failover='true'};
+cf_activate_failover(CF, CaptureGroup, Call) ->
+    lager:info("activating call forwarding on failover with number ~s", [CaptureGroup]),
+    _ = try
+            {'ok', _} = kapps_call_command:b_prompt(<<"cf-now_forwarded_to">>, Call),
+            {'ok', _} = kapps_call_command:b_say(CaptureGroup, Call)
+        catch
+            _:_ -> 'ok'
+        end,
+    CF#callfwd{failover='true', number=CaptureGroup}.
+
+%%------------------------------------------------------------------------------
+%% @doc This function will update the call forwarding object on the owner
+%% document to disable call forwarding on failover
+%% @end
+%%------------------------------------------------------------------------------
+-spec cf_deactivate_failover(callfwd(), kapps_call:call()) -> callfwd().
+cf_deactivate_failover(CF, Call) ->
+    lager:info("deactivating call forwardingon failover"),
+    catch({'ok', _} = kapps_call_command:b_prompt(<<"cf-disabled">>, Call)),
+    CF#callfwd{failover='false'}.
+
+%%------------------------------------------------------------------------------
+%% @doc This function will update the call forwarding object on the owner
 %% document with a new number
 %% @end
 %%------------------------------------------------------------------------------
@@ -224,6 +264,7 @@ update_callfwd(#callfwd{doc_id=Id
                        ,number=Num
                        ,require_keypress=_RK
                        ,keep_caller_id=_KCI
+                       ,failover=Failover
                        }=CF
               ,Call) ->
     lager:info("updating call forwarding settings on ~s", [Id]),
@@ -232,6 +273,8 @@ update_callfwd(#callfwd{doc_id=Id
     CFObj = kz_json:get_ne_value(<<"call_forward">>, JObj, kz_json:new()),
     Updates = [fun(J) -> kz_json:set_value(<<"enabled">>, Enabled, J) end
               ,fun(J) -> kz_json:set_value(<<"number">>, Num, J) end
+              ,fun(J) -> kz_json:set_value(<<"failover">>, Failover, J) end
+              ,fun(J) -> kz_json:set_value(<<"keep_caller_id">>, 'false, J) end
               ],
     CFObj1 = lists:foldl(fun(F, Acc) -> F(Acc) end, CFObj, Updates),
     case kz_datamgr:save_doc(AccountDb, kz_json:set_value(<<"call_forward">>, CFObj1, JObj)) of
