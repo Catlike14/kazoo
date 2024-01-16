@@ -778,7 +778,8 @@ ready_agents(#state{strategy=Strategy
 %%------------------------------------------------------------------------------
 -spec ready_agents(queue_strategy(), queue_strategy_state()) -> kz_term:ne_binaries().
 ready_agents('rr', AgentQueue) -> queue:to_list(AgentQueue);
-ready_agents('mi', AgentL) -> AgentL.
+ready_agents('mi', AgentL) -> AgentL;
+ready_agents('all', AgentL) -> AgentL.
 
 %%------------------------------------------------------------------------------
 %% @doc Return the count of agents that are ready to take calls.
@@ -797,7 +798,8 @@ ready_agent_count(#state{strategy=Strategy
 %%------------------------------------------------------------------------------
 -spec ready_agent_count(queue_strategy(), queue_strategy_state()) -> non_neg_integer().
 ready_agent_count('rr', AgentQueue) -> queue:len(AgentQueue);
-ready_agent_count('mi', AgentL) -> length(AgentL).
+ready_agent_count('mi', AgentL) -> length(AgentL);
+ready_agent_count('all', AgentL) -> length(AgentL).
 
 %%------------------------------------------------------------------------------
 %% @doc Return the count of agents that are eligible to be assigned to a waiting
@@ -823,7 +825,9 @@ assignable_agent_count(#state{strategy=Strategy
 assignable_agent_count('rr', AgentQueue, RingingAgents) ->
     ready_agent_count('rr', AgentQueue) + length(RingingAgents);
 assignable_agent_count('mi', AgentL, RingingAgents) ->
-    ready_agent_count('mi', AgentL) + length(RingingAgents).
+    ready_agent_count('mi', AgentL) + length(RingingAgents);
+assignable_agent_count('all', AgentL, RingingAgents) ->
+    ready_agent_count('all', AgentL) + length(RingingAgents).
 
 %%------------------------------------------------------------------------------
 %% @doc Return the IDs of all agents.
@@ -1018,7 +1022,6 @@ create_strategy_state(Strategy) ->
 -spec create_ss_agents(queue_strategy()) -> queue_strategy_state().
 create_ss_agents('rr') -> queue:new();
 create_ss_agents('mi') -> [].
-create_ss_agents('all') -> [].
 
 maybe_start_queue_workers(QueueSup, Count) ->
     WSup = acdc_queue_sup:workers_sup(QueueSup),
@@ -1119,6 +1122,14 @@ maybe_send_diagnostics_for_strategy_update('rr', AgentQueue, AgentId, RingingAge
           ,queue:to_list(AgentQueue)
           ]);
 maybe_send_diagnostics_for_strategy_update('mi', AgentL, AgentId, RingingAgents, BusyAgents) ->
+    Message = "agent ~s updated in SS~n~n"
+        ++ "ringing agents: ~p~n~n"
+        ++ "busy agents: ~p~n~n"
+        ++ "agent list: ~p",
+    ?DIAG(Message
+         ,[AgentId, RingingAgents, BusyAgents, AgentL]
+         );
+maybe_send_diagnostics_for_strategy_update('all', AgentL, AgentId, RingingAgents, BusyAgents) ->
     Message = "agent ~s updated in SS~n~n"
         ++ "ringing agents: ~p~n~n"
         ++ "busy agents: ~p~n~n"

@@ -58,7 +58,7 @@
 -record(state, {listener_proc :: kz_term:api_pid()
                ,manager_proc :: pid()
                ,connect_resps = [] :: kz_json:objects()
-               ,connect_wins = [] : kz_json:objects()
+               ,connect_wins = [] :: kz_json:objects()
                ,collect_ref :: kz_term:api_reference()
                ,account_id :: kz_term:ne_binary()
                ,account_db :: kz_term:ne_binary()
@@ -437,7 +437,7 @@ connecting('cast', {'accepted', AcceptJObj}, #state{listener_proc=ListenerSrv
             CallId = kapps_call:call_id(Call),
             webseq:evt(?WSD_ID, self(), CallId, <<"member call - agent acceptance">>),
 
-            lists:foreach(fun(Win) -> acdc_queue_listener:member_connect_satisfied(Srv, Win, []) end, Wins),
+            lists:foreach(fun(Win) -> acdc_queue_listener:member_connect_satisfied(ListenerSrv, Win, []) end, Wins),
             acdc_queue_listener:finish_member_call(ListenerSrv),
             acdc_stats:call_handled(AccountId, QueueId, CallId
                                    ,kz_json:get_value(<<"Agent-ID">>, AcceptJObj)
@@ -633,7 +633,7 @@ handle_member_call_cancel_dtmf_exit(JObj, StateName, #state{listener_proc=Listen
                                                            ,account_id=AccountId
                                                            ,queue_id=QueueId
                                                            ,member_call=MemberCall
-                                                           ,member_call_winner=Winner
+                                                           ,member_call_winners=Winners
                                                            ,caller_exit_key=DTMF
                                                            }=State) ->
     CallId = kz_json:get_ne_binary_value(<<"Call-ID">>, JObj),
@@ -644,7 +644,7 @@ handle_member_call_cancel_dtmf_exit(JObj, StateName, #state{listener_proc=Listen
 
             webseq:evt(?WSD_ID, self(), CallId, <<"member call finish - DTMF">>),
 
-            acdc_queue_listener:exit_member_call(ListenerSrv, Winner),
+            lists:foreach(fun(Winner) -> acdc_queue_listener:exit_member_call(ListenerSrv, Winner) end, Winners),
             acdc_stats:call_abandoned(AccountId, QueueId, CallId, ?ABANDON_EXIT),
             {'next_state', 'ready', clear_member_call(State), 'hibernate'};
         _ -> {'next_state', StateName, State}
@@ -885,7 +885,7 @@ maybe_pick_winner(#state{connect_resps=CRs
                         ,{<<"Notifications">>, Notifications}
                         ],
 
-            ConnectWins = lists:fold(fun(Winner, Wins) ->
+            ConnectWins = lists:foldl(fun(Winner, Wins) ->
                     NewAgent = update_agent(Winner, Winners),
                     acdc_queue_listener:member_connect_win(ListenerSrv, NewAgent, props:filter_undefined(QueueOpts)),
                     lager:debug("sending win to ~s(~s)", [kz_json:get_value(<<"Agent-ID">>, Winner)
