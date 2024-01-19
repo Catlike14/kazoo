@@ -1022,6 +1022,7 @@ create_strategy_state(Strategy) ->
 -spec create_ss_agents(queue_strategy()) -> queue_strategy_state().
 create_ss_agents('rr') -> queue:new();
 create_ss_agents('mi') -> [].
+create_ss_agents('all') -> [].
 
 maybe_start_queue_workers(QueueSup, Count) ->
     WSup = acdc_queue_sup:workers_sup(QueueSup),
