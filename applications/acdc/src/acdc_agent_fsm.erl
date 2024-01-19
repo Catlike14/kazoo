@@ -746,8 +746,9 @@ ringing('cast', {'member_connect_satisfied', JObj}, #state{agent_listener=AgentL
                                                           ,connect_failures=Fails
                                                           ,max_connect_failures=MaxFails
                                                           }=State) ->
-    lager:info("Received member_connect_satisfied: check if I should hangup"),
+    lager:info("Received member_connect_satisfied for ~s: check if I should hangup...", [AgentId]),
     CallId = kz_json:get_ne_binary_value([<<"Call">>, <<"Call-Id">>], JObj, []),
+    lager:debug("CallId: ~s MemberCallId: ~s", [CallId, MemberCallId]),
     case CallId =:= MemberCallId of
         true ->
             lager:info("Hanging up: some other agent replies"),
@@ -761,7 +762,9 @@ ringing('cast', {'member_connect_satisfied', JObj}, #state{agent_listener=AgentL
                 'paused' -> {'next_state', 'paused', NewFSMState};
                 'ready' -> apply_state_updates(NewFSMState)
             end;
-        false -> {'next_state', 'ringing', State}
+        false ->
+            lager:debug("Call is mine - I won't hangup!"),
+            {'next_state', 'ringing', State}
     end;
 ringing('cast', {'originate_ready', JObj}, #state{agent_listener=AgentListener}=State) ->
     CallId = kz_json:get_value(<<"Call-ID">>, JObj),
@@ -1019,8 +1022,8 @@ answered('cast', {'member_connect_win', JObj, 'same_node'}, #state{agent_listene
     acdc_agent_listener:member_connect_retry(AgentListener, JObj),
 
     {'next_state', 'answered', State};
-answered('cast', {'member_connect_satisfied', _}, State) ->
-    lager:info("unexpected member_connect_satisfied"),
+answered('cast', {'member_connect_satisfied', _}, #state{agent_id=AgentId}=State) ->
+    lager:info("unexpected member_connect_satisfied for ~s", [AgentId]),
     {'next_state', 'answered', State};
 answered('cast', {'dialplan_error', _App}, #state{agent_listener=AgentListener
                                                  ,account_id=AccountId
