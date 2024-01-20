@@ -749,7 +749,7 @@ ringing('cast', {'member_connect_satisfied', JObj}, #state{agent_listener=AgentL
                                                           }=State) ->
     lager:info("Received member_connect_satisfied for ~s: check if I should hangup...", [AgentId]),
     CallId = kz_json:get_ne_binary_value([<<"Call">>, <<"Call-Id">>], JObj, []),
-    lager:debug("CallId: ~s MemberCallId: ~s AgentCallId: ~s", [CallId, MemberCallId, AgentCallId]),
+    lager:debug("CallId: ~s MemberCallId: ~s AgentCallId: ~s", [CallId, MemberCallId, ACallId]),
     lager:debug("JObj: ~p", [JObj]),
     lager:debug("State: ~p", [State]),
     case CallId =:= MemberCallId of
