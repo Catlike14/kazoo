@@ -738,7 +738,7 @@ ringing('cast', {'member_connect_win', JObj, 'same_node'}, #state{agent_listener
     acdc_agent_listener:member_connect_retry(AgentListener, JObj),
 
     {'next_state', 'ringing', State};
-ringing('cast', {'member_connect_satisfied', JObj}, #state{agent_listener=AgentListener
+ringing('cast', {'member_connect_satisfied', _JObj}, #state{agent_listener=AgentListener
                                                           ,member_call_id=MemberCallId
                                                           ,account_id=AccountId
                                                           ,member_call_queue_id=QueueId
