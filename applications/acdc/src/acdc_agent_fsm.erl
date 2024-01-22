@@ -745,29 +745,17 @@ ringing('cast', {'member_connect_satisfied', JObj}, #state{agent_listener=AgentL
                                                           ,agent_id=AgentId
                                                           ,connect_failures=Fails
                                                           ,max_connect_failures=MaxFails
-                                                          ,agent_call_id=ACallId
                                                           }=State) ->
-    lager:info("Received member_connect_satisfied for ~s: check if I should hangup...", [AgentId]),
-    CallId = kz_json:get_ne_binary_value([<<"Call">>, <<"Call-Id">>], JObj, []),
-    lager:debug("CallId: ~s MemberCallId: ~s AgentCallId: ~s", [CallId, MemberCallId, ACallId]),
-    lager:debug("JObj: ~p", [JObj]),
-    lager:debug("State: ~p", [State]),
-    case CallId =:= MemberCallId of
-        true ->
-            lager:info("Hanging up: some other agent replies"),
-            acdc_agent_listener:channel_hungup(AgentListener, MemberCallId),
-            acdc_stats:call_missed(AccountId, QueueId, AgentId, MemberCallId, <<"LOSE_RACE">>),
-            acdc_agent_listener:presence_update(AgentListener, ?PRESENCE_GREEN),
+    lager:info("Hanging up ~s: some other agent replies", [AgentId]),
+    acdc_agent_listener:channel_hungup(AgentListener, MemberCallId),
+    acdc_stats:call_missed(AccountId, QueueId, AgentId, MemberCallId, <<"LOSE_RACE">>),
+    acdc_agent_listener:presence_update(AgentListener, ?PRESENCE_GREEN),
 
-            NewFSMState = clear_call(State, 'failed'),
-            NextState = return_to_state(Fails+1, MaxFails),
-            case NextState of
-                'paused' -> {'next_state', 'paused', NewFSMState};
-                'ready' -> apply_state_updates(NewFSMState)
-            end;
-        false ->
-            lager:debug("Call is mine - I won't hangup!"),
-            {'next_state', 'ringing', State}
+    NewFSMState = clear_call(State, 'failed'),
+    NextState = return_to_state(Fails+1, MaxFails),
+    case NextState of
+        'paused' -> {'next_state', 'paused', NewFSMState};
+        'ready' -> apply_state_updates(NewFSMState)
     end;
 ringing('cast', {'originate_ready', JObj}, #state{agent_listener=AgentListener}=State) ->
     CallId = kz_json:get_value(<<"Call-ID">>, JObj),
@@ -1026,7 +1014,7 @@ answered('cast', {'member_connect_win', JObj, 'same_node'}, #state{agent_listene
 
     {'next_state', 'answered', State};
 answered('cast', {'member_connect_satisfied', _}, #state{agent_id=AgentId}=State) ->
-    lager:info("unexpected member_connect_satisfied for ~s", [AgentId]),
+    lager:info("Agent ~s got the call", [AgentId]),
     {'next_state', 'answered', State};
 answered('cast', {'dialplan_error', _App}, #state{agent_listener=AgentListener
                                                  ,account_id=AccountId
