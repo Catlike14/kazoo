@@ -134,7 +134,9 @@ maybe_early_media(Node, UUID, JObj, Endpoints) ->
 maybe_early_media_separator(Node, UUID, _JObj, ?SEPARATOR_SIMULTANEOUS) ->
     lager:debug("bridge is simultaneous to multiple endpoints, starting local ringing"),
     ecallmgr_util:send_cmd(Node, UUID, <<"ring_ready">>, "");
-maybe_early_media_separator(_Node, _UUID, _, _) -> 'ok'.
+maybe_early_media_separator(_Node, _UUID, _, _) -> 'ok' ->
+    lager:debug("HOTFIX: bridge is not simultaneous to multiple endpoints - forcing local ringing anyway"),
+    ecallmgr_util:send_cmd(Node, UUID, <<"ring_ready">>, "").
 
 -spec handle_hold_media(kz_term:proplist(), atom(), kz_term:ne_binary(), channel(), kz_json:object()) -> kz_term:proplist().
 handle_hold_media(DP, _Node, UUID, _Channel, JObj) ->
