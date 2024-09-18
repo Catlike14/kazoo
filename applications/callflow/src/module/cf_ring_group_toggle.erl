@@ -78,7 +78,7 @@ maybe_modify_children(Children, Call, DisableUntil) ->
 alter_endpoints(Module, Call, DisableUntil) ->
     EndpointsPath = [<<"data">>, <<"endpoints">>],
     OldEndpoints = kz_json:get_value(EndpointsPath, Module),
-    {Found, EndPoints} = lists:foldl(fun(Endpoint, {Found, UpdatedEndpoints}) ->
+    {Found, EndPoints} = lists:foldr(fun(Endpoint, {Found, UpdatedEndpoints}) ->
                                              {ThisFound, Res} = maybe_alter_disable_until(kz_json:get_value(<<"endpoint_type">>, Endpoint), Endpoint, Call, DisableUntil),
                                              {Found or ThisFound, [Res | UpdatedEndpoints]}
                                      end, {'false', []}, OldEndpoints),
