@@ -110,7 +110,7 @@ connect_to_a_channel(Channels, Call) ->
             'false';
         {[], [RemoteUUID|_Remote]} ->
             lager:debug("no unanswered calls on my media server, trying ~s", [RemoteUUID]),
-            intercept_call(RemoteUUID, Call),
+            intercept_call(RemoteUUID, Call);
         {[LocalUUID|_Cs], _} ->
             lager:debug("found a call (~s) on my media server", [LocalUUID]),
             intercept_call(LocalUUID, Call)
