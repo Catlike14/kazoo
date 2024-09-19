@@ -47,19 +47,26 @@ handle(Data, Call) ->
             'true' ->
                 case find_sip_endpoints(Data, Call) of
                     [] ->
+                        lager:debug("no users in group, pickup failed"),
                         no_users_in_group(Call),
                         'false';
                     DeviceIds -> connect_to_ringing_channel(DeviceIds, Call)
                 end;
             'false' ->
+                lager:debug("no permission to intercept, pickup failed"),
                 no_permission_to_intercept(Call),
                 'false'
         end,
     should_stop_call(PickupCompleted, Call).
 
 -spec should_stop_call(boolean(), kapps_call:call()) -> any().
-should_stop_call('true', Call) -> cf_exe:stop(Call);
-should_stop_call('false', Call) -> cf_exe:continue(Call).
+should_stop_call('true', Call) ->
+    lager:info("pickup completed, stopping call"),
+    cf_exe:stop(Call);
+should_stop_call('false', Call) ->
+    lager:info("pickup failed, continuing call"),
+    cf_exe:continue(Call).
+    
 
 -spec maybe_allowed_to_intercept(kz_json:object(), kapps_call:call()) -> boolean().
 maybe_allowed_to_intercept(Data, Call) ->
@@ -88,13 +95,14 @@ maybe_belongs_to_group(GroupId, Call) ->
 
 -spec connect_to_ringing_channel(kz_term:ne_binaries(), kapps_call:call()) -> boolean().
 connect_to_ringing_channel(DeviceIds, Call) ->
-    _ = case find_channels(DeviceIds) of
+    Result = case find_channels(DeviceIds) of
             [] ->
+                lager:debug("no channels ringing, pickup failed"),
                 no_channels_ringing(Call),
                 'false';
             Channels -> connect_to_a_channel(Channels, Call)
         end,
-    'ok'.
+    Result.
 
 -spec connect_to_a_channel(kz_json:objects(), kapps_call:call()) -> boolean().
 connect_to_a_channel(Channels, Call) ->
