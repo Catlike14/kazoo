@@ -285,15 +285,17 @@ find_user_endpoints(UserIds, DeviceIds, Call) ->
 -spec no_users_in_group(kapps_call:call()) -> any().
 no_users_in_group(Call) ->
     kapps_call_command:answer(Call),
-    kapps_call_command:b_play(<<"system_media/pickup-no_users">>, Call).
+    Prompt = kapps_call:get_prompt(Call, <<"pickup-no_users">>),
+    kapps_call_command:play(Prompt, Call).
 
 -spec no_channels_ringing(kapps_call:call()) -> any().
 no_channels_ringing(Call) ->
     kapps_call_command:answer(Call),
-    kapps_call_command:b_play(<<"system_media/pickup-no_channels">>, Call).
+    Prompt = kapps_call:get_prompt(Call, <<"pickup-no_channels">>),
+    kapps_call_command:play(Prompt, Call).
 
 -spec no_permission_to_intercept(kapps_call:call()) -> any().
-%% TODO: please convert to system_media file (say is not consistent on deployments)
 no_permission_to_intercept(Call) ->
     kapps_call_command:answer(Call),
-    kapps_call_command:b_say(<<"you have no permission to intercept this call">>, Call).
+    Prompt = kapps_call:get_prompt(Call, <<"pickup-no_permission">>),
+    kapps_call_command:play(Prompt, Call).
