@@ -43,15 +43,30 @@
 %%------------------------------------------------------------------------------
 -spec handle(kz_json:object(), kapps_call:call()) -> any().
 handle(Data, Call) ->
-    _ = case maybe_allowed_to_intercept(Data, Call) of
+    PickupCompleted = case maybe_allowed_to_intercept(Data, Call) of
             'true' ->
                 case find_sip_endpoints(Data, Call) of
-                    [] -> no_users_in_group(Call);
+                    [] ->
+                        lager:debug("no users in group, pickup failed"),
+                        no_users_in_group(Call),
+                        'false';
                     DeviceIds -> connect_to_ringing_channel(DeviceIds, Call)
                 end;
-            'false' -> no_permission_to_intercept(Call)
+            'false' ->
+                lager:debug("no permission to intercept, pickup failed"),
+                no_permission_to_intercept(Call),
+                'false'
         end,
-    cf_exe:stop(Call).
+    should_stop_call(PickupCompleted, Call).
+
+-spec should_stop_call(boolean(), kapps_call:call()) -> any().
+should_stop_call('true', Call) ->
+    lager:info("pickup completed, stopping call"),
+    cf_exe:stop(Call);
+should_stop_call('false', Call) ->
+    lager:info("pickup failed, continuing call"),
+    cf_exe:continue(Call).
+    
 
 -spec maybe_allowed_to_intercept(kz_json:object(), kapps_call:call()) -> boolean().
 maybe_allowed_to_intercept(Data, Call) ->
@@ -78,15 +93,18 @@ maybe_belongs_to_user(UserId, Call) ->
 maybe_belongs_to_group(GroupId, Call) ->
     lists:member(kapps_call:authorizing_id(Call), find_group_endpoints(GroupId, Call)).
 
--spec connect_to_ringing_channel(kz_term:ne_binaries(), kapps_call:call()) -> 'ok'.
+-spec connect_to_ringing_channel(kz_term:ne_binaries(), kapps_call:call()) -> boolean().
 connect_to_ringing_channel(DeviceIds, Call) ->
-    _ = case find_channels(DeviceIds) of
-            [] -> no_channels_ringing(Call);
+    Result = case find_channels(DeviceIds) of
+            [] ->
+                lager:debug("no channels ringing, pickup failed"),
+                no_channels_ringing(Call),
+                'false';
             Channels -> connect_to_a_channel(Channels, Call)
         end,
-    'ok'.
+    Result.
 
--spec connect_to_a_channel(kz_json:objects(), kapps_call:call()) -> 'ok'.
+-spec connect_to_a_channel(kz_json:objects(), kapps_call:call()) -> boolean().
 connect_to_a_channel(Channels, Call) ->
     MyUUID = kapps_call:call_id(Call),
     MyMediaServer = kapps_call:switch_nodename(Call),
@@ -96,7 +114,8 @@ connect_to_a_channel(Channels, Call) ->
     case sort_channels(Channels, MyUUID, MyMediaServer) of
         {[], []} ->
             lager:debug("no channels available to pickup"),
-            no_channels_ringing(Call);
+            no_channels_ringing(Call),
+            'false';
         {[], [RemoteUUID|_Remote]} ->
             lager:debug("no unanswered calls on my media server, trying ~s", [RemoteUUID]),
             intercept_call(RemoteUUID, Call);
@@ -148,16 +167,18 @@ maybe_add_other_leg(Channel, Legs) ->
         Leg -> [Leg | Legs]
     end.
 
--spec intercept_call(kz_term:ne_binary(), kapps_call:call()) -> 'ok'.
+-spec intercept_call(kz_term:ne_binary(), kapps_call:call()) -> boolean().
 intercept_call(UUID, Call) ->
     _ = kapps_call_command:send_command(pickup_cmd(UUID), Call),
     case wait_for_pickup(Call) of
         {'error', _E} ->
-            lager:debug("failed to pickup ~s: ~p", [UUID, _E]);
+            lager:debug("failed to pickup ~s: ~p", [UUID, _E]),
+            'false';
         'ok' ->
             lager:debug("call picked up"),
             _ = kapps_call_command:wait_for_hangup(),
-            lager:debug("hangup recv")
+            lager:debug("hangup recv"),
+            'true'
     end.
 
 -spec pickup_cmd(kz_term:ne_binary()) -> kz_term:proplist().
@@ -262,17 +283,22 @@ find_user_endpoints(UserIds, DeviceIds, Call) ->
     lists:merge(lists:sort(UserDeviceIds), DeviceIds).
 
 -spec no_users_in_group(kapps_call:call()) -> any().
-no_users_in_group(Call) ->
-    kapps_call_command:answer(Call),
-    kapps_call_command:b_play(<<"system_media/pickup-no_users">>, Call).
+no_users_in_group(_Call) ->
+    'ok'.
+%    kapps_call_command:answer(Call),
+%    Prompt = kapps_call:get_prompt(Call, <<"pickup-no_users">>),
+%    kapps_call_command:play(Prompt, Call).
 
 -spec no_channels_ringing(kapps_call:call()) -> any().
-no_channels_ringing(Call) ->
-    kapps_call_command:answer(Call),
-    kapps_call_command:b_play(<<"system_media/pickup-no_channels">>, Call).
+no_channels_ringing(_Call) ->
+    'ok'.
+%    kapps_call_command:answer(Call),
+%    Prompt = kapps_call:get_prompt(Call, <<"pickup-no_channels">>),
+%    kapps_call_command:play(Prompt, Call).
 
 -spec no_permission_to_intercept(kapps_call:call()) -> any().
-%% TODO: please convert to system_media file (say is not consistent on deployments)
-no_permission_to_intercept(Call) ->
-    kapps_call_command:answer(Call),
-    kapps_call_command:b_say(<<"you have no permission to intercept this call">>, Call).
+no_permission_to_intercept(_Call) ->
+    'ok'.
+%    kapps_call_command:answer(Call),
+%    Prompt = kapps_call:get_prompt(Call, <<"pickup-no_permission">>),
+%    kapps_call_command:play(Prompt, Call).
