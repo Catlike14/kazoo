@@ -176,6 +176,8 @@ send_route_response(Flow, RouteReq, Call) ->
     lager:info("callflows knows how to route the call! sending park response"),
     AccountId = kapps_call:account_id(Call),
     CCVs = response_ccvs(Call),
+    CAVs = kz_json:get_value(<<"custom_application_vars">>, Flow, kz_json:new()),
+    RespCAVs = kz_json:merge(CAVs, kapps_call:custom_application_vars(Call)),
     Resp = props:filter_undefined(
              [{?KEY_MSG_ID, kz_api:msg_id(RouteReq)}
              ,{?KEY_MSG_REPLY_ID, kapps_call:call_id_direct(Call)}
@@ -186,7 +188,7 @@ send_route_response(Flow, RouteReq, Call) ->
              ,{<<"Pre-Park">>, pre_park_action(Call)}
              ,{<<"From-Realm">>, kzd_accounts:fetch_realm(AccountId)}
              ,{<<"Custom-Channel-Vars">>, CCVs}
-             ,{<<"Custom-Application-Vars">>, kapps_call:custom_application_vars(Call)}
+             ,{<<"Custom-Application-Vars">>, RespCAVs}
              ,{<<"Context">>, kapps_call:context(Call)}
               | kz_api:default_headers(?APP_NAME, ?APP_VERSION)
              ]),
@@ -293,10 +295,14 @@ update_call(Flow, NoMatch, ControllerQ, Call) ->
             ,{'cf_metaflow', kz_json:get_value(<<"metaflows">>, Flow, ?DEFAULT_METAFLOWS(kapps_call:account_id(Call)))}
             ],
 
+    CustomVars = kz_json:get_value(<<"custom_channel_vars">>, Flow, kz_json:new()),
+    lager:debug("callflow ~s has custom channel vars: ~p", [kz_doc:id(Flow), CustomVars]),
+
     Updaters = [{fun kapps_call:kvs_store_proplist/2, Props}
                ,{fun kapps_call:set_controller_queue/2, ControllerQ}
                ,{fun kapps_call:set_application_name/2, ?APP_NAME}
                ,{fun kapps_call:set_application_version/2, ?APP_VERSION}
+               ,{fun kapps_call:set_custom_channel_vars/2, kz_json:to_proplist(CustomVars)}
                ,{fun kapps_call:insert_custom_channel_var/3, <<"CallFlow-ID">>, FlowId}
                ],
     kapps_call:exec(Updaters, Call).
