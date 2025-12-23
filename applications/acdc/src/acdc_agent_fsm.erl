@@ -747,7 +747,7 @@ ringing('cast', {'member_connect_satisfied', _JObj}, #state{agent_listener=Agent
                                                           ,max_connect_failures=MaxFails
                                                           }=State) ->
     lager:info("Hanging up ~s: some other agent replies", [AgentId]),
-    acdc_agent_listener:channel_hungup(AgentListener, MemberCallId),
+    acdc_agent_listener:channel_hungup(AgentListener, MemberCallId, <<"LOSE_RACE">>),
     acdc_stats:call_missed(AccountId, QueueId, AgentId, MemberCallId, <<"LOSE_RACE">>),
     acdc_agent_listener:presence_update(AgentListener, ?PRESENCE_GREEN),
 
@@ -966,7 +966,7 @@ ringing('info', ?DESTROYED_CHANNEL(AgentCallId, Cause), #state{agent_listener=Ag
     lager:debug("ringing agent failed: timeout on ~s ~s", [AgentCallId, Cause]),
 
     acdc_agent_listener:member_connect_retry(AgentListener, MemberCallId),
-    acdc_agent_listener:channel_hungup(AgentListener, MemberCallId),
+    acdc_agent_listener:channel_hungup(AgentListener, MemberCallId, Cause),
 
     acdc_stats:call_missed(AccountId, QueueId, AgentId, MemberCallId, Cause),
 
@@ -978,11 +978,11 @@ ringing('info', ?DESTROYED_CHANNEL(AgentCallId, Cause), #state{agent_listener=Ag
         'paused' -> {'next_state', 'paused', State1};
         'ready' -> apply_state_updates(State1)
     end;
-ringing('info', ?DESTROYED_CHANNEL(MemberCallId, _Cause), #state{agent_listener=AgentListener
+ringing('info', ?DESTROYED_CHANNEL(MemberCallId, Cause), #state{agent_listener=AgentListener
                                                                 ,member_call_id=MemberCallId
                                                                 }=State) ->
-    lager:debug("caller's channel (~s) has gone down, stop agent's call: ~s", [MemberCallId, _Cause]),
-    acdc_agent_listener:channel_hungup(AgentListener, MemberCallId),
+    lager:debug("caller's channel (~s) has gone down, stop agent's call: ~s", [MemberCallId, Cause]),
+    acdc_agent_listener:channel_hungup(AgentListener, MemberCallId, Cause),
 
     acdc_agent_listener:presence_update(AgentListener, ?PRESENCE_GREEN),
     apply_state_updates(clear_call(State, 'ready'));
@@ -1127,8 +1127,8 @@ answered('info', ?DESTROYED_CHANNEL(CallId, Cause), #state{member_call_id=CallId
                                                           ,outbound_call_ids=[]
                                                           }=State) ->
     lager:debug("caller's channel hung up: ~s", [Cause]),
-    {'next_state', 'wrapup', State#state{wrapup_ref=hangup_call(State, 'member')}};
-answered('info', ?DESTROYED_CHANNEL(CallId, _Cause), #state{account_id=AccountId
+    {'next_state', 'wrapup', State#state{wrapup_ref=hangup_call(State, 'member', Cause)}};
+answered('info', ?DESTROYED_CHANNEL(CallId, Cause), #state{account_id=AccountId
                                                            ,agent_id=AgentId
                                                            ,agent_listener=AgentListener
                                                            ,member_call_id=CallId
@@ -1138,15 +1138,15 @@ answered('info', ?DESTROYED_CHANNEL(CallId, _Cause), #state{account_id=AccountId
                                                            }=State) ->
     lager:debug("caller's channel hung up, but there are still some outbounds"),
     acdc_stats:call_processed(AccountId, QueueId, AgentId, CallId, 'member'),
-    acdc_agent_listener:channel_hungup(AgentListener, CallId),
+    acdc_agent_listener:channel_hungup(AgentListener, CallId, Cause),
     maybe_notify(Ns, ?NOTIFY_HANGUP, State),
     {'next_state', 'outbound', start_outbound_call_handling(OutboundCallId, clear_call(State, 'ready')), 'hibernate'};
 answered('info', ?DESTROYED_CHANNEL(CallId, Cause), #state{agent_call_id=CallId
                                                           ,outbound_call_ids=[]
                                                           }=State) ->
     lager:debug("agent's channel has hung up: ~s", [Cause]),
-    {'next_state', 'wrapup', State#state{wrapup_ref=hangup_call(State, 'agent')}};
-answered('info', ?DESTROYED_CHANNEL(CallId, _Cause), #state{account_id=AccountId
+    {'next_state', 'wrapup', State#state{wrapup_ref=hangup_call(State, 'agent', Cause)}};
+answered('info', ?DESTROYED_CHANNEL(CallId, Cause), #state{account_id=AccountId
                                                            ,agent_id=AgentId
                                                            ,agent_listener=AgentListener
                                                            ,member_call_id=MemberCallId
@@ -1157,7 +1157,7 @@ answered('info', ?DESTROYED_CHANNEL(CallId, _Cause), #state{account_id=AccountId
                                                            }=State) ->
     lager:debug("agent's channel hung up, but there are still some outbounds"),
     acdc_stats:call_processed(AccountId, QueueId, AgentId, CallId, 'agent'),
-    acdc_agent_listener:channel_hungup(AgentListener, MemberCallId),
+    acdc_agent_listener:channel_hungup(AgentListener, MemberCallId, Cause),
     maybe_notify(Ns, ?NOTIFY_HANGUP, State),
     {'next_state', 'outbound', start_outbound_call_handling(OutboundCallId, clear_call(State, 'ready')), 'hibernate'};
 answered('info', ?DESTROYED_CHANNEL(CallId, _Cause), #state{agent_listener=AgentListener
@@ -1373,7 +1373,7 @@ outbound('info', ?NEW_CHANNEL_TO(CallId, MemberCallId), State) ->
 outbound('info', ?DESTROYED_CHANNEL(CallId, Cause), #state{agent_listener=AgentListener
                                                           ,outbound_call_ids=OutboundCallIds
                                                           }=State) ->
-    acdc_agent_listener:channel_hungup(AgentListener, CallId),
+    acdc_agent_listener:channel_hungup(AgentListener, CallId, Cause),
     case lists:member(CallId, OutboundCallIds) of
         'true' ->
             lager:debug("agent outbound channel ~s down: ~s", [CallId, Cause]),
@@ -1707,17 +1707,17 @@ wrapup_timer(#state{agent_listener=AgentListener
     acdc_agent_stats:agent_wrapup(AccountId, AgentId, WrapupTimeout),
     start_wrapup_timer(WrapupTimeout).
 
--spec hangup_call(state(), 'member' | 'agent') -> reference().
+-spec hangup_call(state(), 'member' | 'agent', kz_term:ne_binary()) -> reference().
 hangup_call(#state{agent_listener=AgentListener
                   ,member_call_id=CallId
                   ,member_call_queue_id=QueueId
                   ,account_id=AccountId
                   ,agent_id=AgentId
                   ,queue_notifications=Ns
-                  }=State, Initiator) ->
+                  }=State, Initiator, Cause) ->
     acdc_stats:call_processed(AccountId, QueueId, AgentId, CallId, Initiator),
 
-    acdc_agent_listener:channel_hungup(AgentListener, CallId),
+    acdc_agent_listener:channel_hungup(AgentListener, CallId, Cause),
     maybe_notify(Ns, ?NOTIFY_HANGUP, State),
     wrapup_timer(State).
 

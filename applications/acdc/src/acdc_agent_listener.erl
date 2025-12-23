@@ -234,7 +234,11 @@ monitor_call(Srv, Call, WinJObj, RecordingUrl) ->
 
 -spec channel_hungup(pid(), kz_term:ne_binary()) -> 'ok'.
 channel_hungup(Srv, CallId) ->
-    gen_listener:cast(Srv, {'channel_hungup', CallId}).
+    channel_hungup(Srv, CallId, 'undefined').
+
+-spec channel_hungup(pid(), kz_term:ne_binary()) -> 'ok'.
+channel_hungup(Srv, CallId, Cause) ->
+    gen_listener:cast(Srv, {'channel_hungup', CallId, Cause}).
 
 -spec unbind_from_events(pid(), kz_term:ne_binary()) -> 'ok'.
 unbind_from_events(Srv, CallId) ->
@@ -458,7 +462,7 @@ handle_cast({'unbind_from_events', CallId}, State) ->
     acdc_util:unbind_from_call_events(CallId),
     {'noreply', State};
 
-handle_cast({'channel_hungup', CallId}, #state{call=Call
+handle_cast({'channel_hungup', CallId, Cause}, #state{call=Call
                                               ,is_thief=IsThief
                                               ,agent_call_ids=ACallIds
                                               ,agent_id=AgentId
@@ -499,7 +503,7 @@ handle_cast({'channel_hungup', CallId}, #state{call=Call
                 CtrlQ ->
                     lager:debug("agent channel ~s hungup, stop call on ctlq ~s", [CallId, CtrlQ]),
                     acdc_util:unbind_from_call_events(CallId),
-                    stop_agent_leg(CallId, CtrlQ),
+                    stop_agent_leg(CallId, CtrlQ, Cause),
                     {'noreply', State#state{agent_call_ids=props:delete(CallId, ACallIds)}}
             end
     end;
@@ -1228,16 +1232,27 @@ is_thief(Agent) -> not kz_json:is_json_object(Agent).
 
 handle_fsm_started(_FSMPid) -> gen_listener:cast(self(), 'bind_to_member_reqs').
 
+-spec stop_agent_leg(kz_term:ne_binary(), kz_term:ne_binary()) -> 'ok'.
 stop_agent_leg('undefined', _) -> lager:debug("agent call id not defined");
 stop_agent_leg(_, 'undefined') -> lager:debug("agent ctrl queue not defined");
-stop_agent_leg(ACallId, ACtrlQ) ->
+stop_agent_leg(ACallId, ACtrlQ) -> stop_agent_leg(ACallId, ACtrlQ, 'undefined').
+
+-spec stop_agent_leg(kz_term:ne_binary(), kz_term:ne_binary(), kz_term:ne_binary()) -> 'ok'.
+stop_agent_leg(ACallId, ACtrlQ, Cause) ->
     Command = [{<<"Application-Name">>, <<"hangup">>}
               ,{<<"Insert-At">>, <<"now">>}
               ,{<<"Call-ID">>, ACallId}
+               | get_hangup_cause_for_command(Cause)
                | kz_api:default_headers(<<"call">>, <<"command">>, ?APP_NAME, ?APP_VERSION)
               ],
     lager:debug("sending hangup to ~s: ~s", [ACallId, ACtrlQ]),
     kapi_dialplan:publish_command(ACtrlQ, Command).
+
+-spec get_hangup_cause_for_command(kz_term:ne_binary()) -> kz_term:proplist().
+get_hangup_cause_for_command('undefined') -> [];
+get_hangup_cause_for_command(Cause) ->
+    lager:debug("stopping agent with hangup cause: ~s", [Cause]),
+    [{<<"Hangup-Cause">>, Cause}].
 
 -spec find_account_id(kz_json:object()) -> kz_term:api_ne_binary().
 find_account_id(JObj) ->
